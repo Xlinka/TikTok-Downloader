@@ -46,7 +46,7 @@ namespace TiktokDownloader
 
             private async Task FetchMetadata()
             {
-                string apiUrl = $"https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id={VideoId}";
+                string apiUrl = $"https://api22-normal-c-useast2a.tiktokv.com/aweme/v1/feed/?aweme_id={VideoId}";
 
                 using (HttpClient client = new HttpClient())
                 {
