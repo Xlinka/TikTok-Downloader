@@ -1,136 +1,145 @@
 ﻿using System;
 using System.IO;
 using System.Net.Http;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace TiktokDownloader
-{
+{   
+
     class Program
     {
+        static HttpClient client = new HttpClient();
+        static Random rand = new Random();
+
         static async Task Main(string[] args)
         {
-            Console.WriteLine("TikTok Downloader");
-            Console.WriteLine("==============================");
-
-            Console.Write("Enter the URL of the TikTok video you want to download: ");
-            string url = Console.ReadLine();
-
-            // Check if the input is a TikTok video URL
-            if (Regex.Match(url, @"https:\/\/www\.tiktok\.com\/.+").Success)
+            do
             {
-                // Create a Video object and download the video
-                Video video = new Video(url);
-                Console.Write(video);
-                await video.DownloadAsync();
+                Console.WriteLine("TikTok Downloader");
+                Console.WriteLine("==============================");
+
+                Console.Write("Enter the URL of the TikTok video you want to download: ");
+                string url = Console.ReadLine();
+
+                if (!Regex.IsMatch(url, @"https:\/\/www\.tiktok\.com\/.+"))
+                {
+                    Console.WriteLine("Invalid URL. Please enter a valid TikTok video URL.");
+                    continue; 
+                }
+
+                string videoId = ExtractVideoId(url);
+                if (string.IsNullOrEmpty(videoId))
+                {
+                    Console.WriteLine("Failed to extract video ID.");
+                    continue; 
+                }
+
+                SetRandomUserAgent();
+                await DownloadVideoAsync(videoId);
+
+                Console.WriteLine("Do you want to download another video? (yes/no)");
             }
-            else
-            {
-                Console.WriteLine("Invalid URL. Please enter a valid TikTok video URL.");
-            }
+            while (Console.ReadLine().Trim().ToLower() == "yes");
         }
 
-        class Video
+        static string ExtractVideoId(string url)
         {
-            public string VideoId { get; private set; }
-            public string DownloadUrl { get; private set; }
-
-            public Video(string url)
+            var match = Regex.Match(url, @"https:\/\/www\.tiktok\.com\/@[^/]+\/video\/(\d+)");
+            if (!match.Success)
             {
-                // Extract the video ID from the URL
-                VideoId = GetVideoId(url);
-
-                // Fetch the video metadata
-                FetchMetadata().Wait();
-            }
-
-            private async Task FetchMetadata()
-            {
-                string apiUrl = $"https://api22-normal-c-useast2a.tiktokv.com/aweme/v1/feed/?aweme_id={VideoId}";
-
-                using (HttpClient client = new HttpClient())
-                {
-                    client.DefaultRequestHeaders.Clear();
-                    client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36");
-
-                    HttpResponseMessage response = await client.GetAsync(apiUrl);
-                    string content = await response.Content.ReadAsStringAsync();
-
-                    // Extract the download URL from the API response
-                    DownloadUrl = ExtractDownloadUrl(content);
-                }
-            }
-
-            private string GetVideoId(string url)
-            {
-                // Extract the video ID from the URL
-                var match = Regex.Match(url, @"https:\/\/www\.tiktok\.com\/@[^/]+\/video\/(\d+)");
-                if (match.Success)
-                {
-                    return match.Groups[1].Value;
-                }
+                Console.WriteLine("Failed to extract Video ID from URL.");
                 return null;
             }
 
-            private string ExtractDownloadUrl(string content)
-            {
-                try
-                {
-                    dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(content);
-                    string url = data.aweme_list[0].video.play_addr.url_list[0].Value;
-                    return url.Replace("playwm", "play");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error extracting download URL: {ex.Message}");
-                    return null;
-                }
-            }
+            return match.Groups[1].Value;
+        }
 
-            public override string ToString()
+        static void SetRandomUserAgent()
+        {
+            string[] userAgents = new string[]
             {
-                if (string.IsNullOrEmpty(DownloadUrl))
-                {
-                    return $"==============================\nVideo ID: {VideoId}\nUnable to retrieve video info.\n==============================\n";
-                }
-                else
-                {
-                    return $"==============================\nVideo ID: {VideoId}\nDownload URL: {DownloadUrl}\n==============================\n";
-                }
-            }
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:87.0) Gecko/20100101 Firefox/87.0",
+                // Add more as needed
+            };
 
-            public async Task DownloadAsync()
+            string randomAgent = userAgents[rand.Next(userAgents.Length)];
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(randomAgent);
+        }
+
+        static async Task DownloadVideoAsync(string videoId)
+        {
+            string apiUrl = $"https://api22-normal-c-alisg.tiktokv.com/aweme/v1/feed/?aweme_id={videoId}&iid=7318518857994389254&device_id=7318517321748022790&channel=googleplay&app_name=musical_ly&version_code=300904&device_platform=android&device_type=ASUS_Z01QD&version=9";
+            try
             {
-                if (string.IsNullOrEmpty(DownloadUrl))
+                HttpResponseMessage response = await client.GetAsync(apiUrl);
+                string content = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine("Unable to download the video.");
+                    Logger.Log($"Failed to fetch video for Video ID: {videoId}. Status code: {response.StatusCode}");
                     return;
                 }
 
-                using (HttpClient client = new HttpClient())
+                string downloadUrl = ExtractDownloadUrl(content);
+                if (string.IsNullOrEmpty(downloadUrl))
                 {
-                    string fileName = $"Videos/{VideoId}.mp4";
+                    Console.WriteLine("Failed to extract the download URL from the API response.");
+                    return;
+                }
 
-                    client.DefaultRequestHeaders.Clear();
-                    client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36");
-                    client.DefaultRequestHeaders.Add("Referer", "https://www.tiktok.com/");
+                await SaveVideoAsync(downloadUrl, videoId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Exception occurred: {ex.Message}");
+            }
+        }
 
-                    HttpResponseMessage response = await client.GetAsync(DownloadUrl);
+        static string ExtractDownloadUrl(string apiResponse)
+        {
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(apiResponse);
+                var videoUrl = doc.RootElement
+                                .GetProperty("aweme_list")[0]
+                                .GetProperty("video")
+                                .GetProperty("play_addr")
+                                .GetProperty("url_list")[0].GetString();
 
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        Console.WriteLine($"Failed to download video. Status code: {response.StatusCode}");
-                        return;
-                    }
+                return videoUrl?.Replace("\\u0026", "&");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Error parsing JSON response: {ex.Message}");
+                return null;
+            }
+        }
 
-                    using (Stream contentStream = await response.Content.ReadAsStreamAsync(),
-                           stream = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, useAsync: true))
-                    {
-                        await contentStream.CopyToAsync(stream);
-                    }
+        static async Task SaveVideoAsync(string downloadUrl, string videoId)
+        {
+            HttpResponseMessage response = await client.GetAsync(downloadUrl);
+            if (response.IsSuccessStatusCode)
+            {
+                string folderPath = Path.Combine(Directory.GetCurrentDirectory(), "videos");
+                if (!Directory.Exists(folderPath))
+                {
+                    Directory.CreateDirectory(folderPath);
+                }
 
+                string fileName = Path.Combine(folderPath, $"{videoId}.mp4");
+                using (var fs = new FileStream(fileName, FileMode.Create, FileAccess.Write))
+                {
+                    await response.Content.CopyToAsync(fs);
                     Console.WriteLine($"Video downloaded successfully: {fileName}");
                 }
+            }
+            else
+            {
+                Logger.Log($"Failed to download the video. Status code: {response.StatusCode}");
             }
         }
     }
